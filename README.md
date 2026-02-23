@@ -1,3 +1,13 @@
+Data and code for the study "Localised negative feedback shapes genome-wide patterning of meiotic DNA breaks"
+
+Instructions for the simulator:
+-Ensure R version 4.4 or later is installed. Rstudio installation is also recommended.
+-Load and run the DSBint_function script. This will register the simulator as a memory object.
+-Call in the simulator by using DSBint(). Hotspot tables need to be supplied to the WTmap (map with interference) and tel1Dmap (map with low/no interference, used as the template for the simulation). These can either be R memory objects or paths to hotspot table files (see data folder AVERAGE_HOTSPOT_TABLES for examples). Other parameters have defaults that may be changed. See the DSBint_function script for more details on parameters.
+-Once finished, the simulator will consolidate all runs into a single output file. The column "sim" contains the simulated hits, in NormHpChr. "WT" denotes the number of hits in the WT hotspot table, while "tel1D" is the number of hits in the template hotspot table. To compare input and simulator data, use the columns "SimRatio" and "RealRatio".
+
+The simulator has been tested on Mac and Linux. It is dependent on the R packages data.table, plyr, e1071, tictoc, bio3d, doParallel, foreach, doFuture, dplyr, and bspec, all of which it will attempt to install upon its first usage if not installed prior to running.
+
 HS_TEMPLATE: Averages Hotspot template used in this studied. Hotspots identified in rDNA region were excluded.
 MGBD_Hotspot_template_4019HS 
 T_0.193_Hotspot_template_3473HS 
