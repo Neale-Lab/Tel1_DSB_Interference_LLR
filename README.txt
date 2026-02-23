@@ -49,3 +49,257 @@ FullMap.Cer3H4L2_sae2Dndt80D_SPO11-GBD_Average_ccLLR14-22.txt
 FullMap.Cer3H4L2_VG402_sae2Dtel1D_Average_1AB234.txt
 FullMap.Cer3H4L2_MJ315_sae2D_Average_12A357BCtxt.txt
 
+Pseudocode version of simulator script:
+
+FUNCTION DSBInt(parameters)
+
+1. Set Working Directory
+   IF running in RStudio:
+       set working directory to script location
+   ELSE IF script path available:
+       set working directory to script location
+
+2. Load Required Packages
+   FOR each package in package_list:
+       IF package not installed:
+           install package
+       load package
+
+3. Define Helper: load_hotspot(x)
+   IF x is dataframe:
+       RETURN x
+   ELSE IF x is valid file path:
+       read file into dataframe
+       RETURN dataframe
+   ELSE:
+       STOP with error
+
+4. Load Hotspot Data
+   A.hotspot ← load_hotspot(tel1Dmap)
+   B.hotspot ← load_hotspot(WTmap)
+
+   IF "NormHpMChr" exists AND "NormHpChr" missing:
+       copy NormHpMChr → NormHpChr
+
+   Keep columns: Chr, Midpoint, NormHpChr
+
+5. Compute Global Parameters
+   E1 ← max(RepN)
+   RepTN ← round(G / RepN)
+   maxsim ← max(RepTN)
+
+6. Precompute Exponential Windows (if Winmethod == "Exponential")
+   FOR each window width w in Windows:
+       compute exponential window of width w
+       store in exp_windows dictionary
+
+7. Build Output Directory Name
+   Generate timestamp string
+   IF fail_on == TRUE:
+       format fail_label with failrate
+   ELSE:
+       fail_label ← empty
+
+   fname ← formatted string including:
+       ActiveChromatids
+       G
+       RepN range
+       Winmethod
+       Windows range
+       chrom
+       fail_label
+       timestamp
+       script_name
+
+   Create directories:
+       output_dir/sim_parts/(optional expname)/fname
+       output_dir/plots/fname
+       output_dir/sim_plots/fname
+
+8. Subset Chromosome Data
+   A1 ← subset A.hotspot for chromosome chrom
+   B1 ← subset B.hotspot for chromosome chrom
+
+   Convert Midpoint to bin index (round(Midpoint/res))
+
+   Aggregate duplicate bins by summing
+
+   L ← round(ChrSizes[chrom] / res)
+
+   Initialize arrays:
+       A[1..L] ← 0
+       B[1..L] ← 0
+
+   Fill A using A1 NormHpChr values
+   Fill B using B1 NormHpChr values
+
+9. Determine Chromosome DSB Count
+   E_raw ← scaled DSB count based on chromosome length and ActiveChromatids
+   E ← round(E_raw)
+   IF E < 1:
+       E ← 1
+
+   Repseq ← floor((E/E1) * RepN)
+   Initialize AllResult ← NULL
+
+10. Parallel Loop Over Window Sizes
+   PARALLEL FOR each window k in Windows:
+
+       FOR each transStrength tr:
+
+           W ← round(k*1000/res)
+           constrain W between 1 and 2*L
+
+           IF Winmethod == "Hann":
+               C ← 1 - hanning.window(W)
+           ELSE IF Winmethod == "Exponential":
+               C ← 1 - exp_windows[k]
+           ELSE:
+               C ← 1 - tukeywindow(W, winr)
+
+           Initialize:
+               H[1..E] ← zero arrays length L
+               F[1..E] ← 0
+               cellcount ← empty table
+
+11. Simulate Cells
+           FOR i = 1 to maxsim:
+
+               DSBN ← 0
+               DSBS ← 0
+               DSBF ← 0
+               RepIndex ← 1
+
+               FOR each chromatid d in 1..ActiveChromatids:
+                   D[d][1..L] ← 1
+
+               FOR j = 1 to E:
+
+                   IF i <= RepTN[RepIndex]:
+
+                       Dact ← random chromatid
+
+                       weighted_probs ← A * D[Dact]
+                       IF sum(weighted_probs) == 0:
+                           CONTINUE
+
+                       pos ← sample bin using weighted_probs
+
+                       is_failed ← FALSE
+                       IF fail_on == TRUE:
+                           IF random() < failrate:
+                               is_failed ← TRUE
+
+                       DSBN++
+
+                       IF is_failed:
+                           DSBF++
+                       ELSE:
+                           DSBS++
+                           H[j][pos]++
+
+                       F[j]++
+
+12. Build Interference Window Around pos
+                       left ← max(1, pos - floor(W/2))
+                       right ← min(L, pos + floor(W/2))
+
+                       Extract appropriate portion of C
+                       Adjust length if necessary
+                       C1[left:right] ← window slice
+
+                       scale_factor ← failStrength IF failed ELSE 1
+
+13. Apply Trans Interference
+                       IF tr > 0:
+                           FOR each chromatid ≠ Dact:
+                               D[chromatid] ← D[chromatid] *
+                                   (((C1 * scale_factor) + ((1/tr)-1)) * tr)
+                               enforce minimum threshold
+
+14. Apply Cis Interference
+                       D[Dact] ← D[Dact] *
+                           (((C1 * scale_factor) + ((1/cisStrength)-1)) * cisStrength)
+                       enforce minimum threshold
+
+15. Snapshot at Replication Checkpoints
+                       IF j in Repseq:
+                           success_frac ← DSBS / DSBN
+                           success_count ← round(success_frac * RepN[RepIndex])
+                           failed_count ← RepN[RepIndex] - success_count
+
+                           append to cellcount:
+                               DSBs = DSBN
+                               GDSBs = RepN[RepIndex]
+                               Cells = i
+                               success_frac
+                               success_count
+                               failed_count
+
+                           RepIndex++
+
+16. Post-Simulation Aggregation
+           H1[1] ← H[1]
+           FOR h = 2 to E:
+               H1[h] ← H1[h-1] + H[h]
+
+           FOR each h:
+               IF sum(H1[h]) > 0:
+                   normalize H1[h] to per million
+               ELSE:
+                   set H1[h] to zero vector
+
+17. Generate Output Tables
+           FOR each h in Repseq:
+
+               Create Result table:
+                   Pos
+                   tel1D = A
+                   WT = B
+                   sim = H1[h]
+
+               Compute:
+                   SimRatio = log2(sim/tel1D)
+                   RealRatio = log2(WT/tel1D)
+
+               Remove NA and infinite rows
+
+               Smooth:
+                   SimR
+                   RealR
+                   DevR
+
+               rmsd ← sqrt(mean((SimRatio - RealRatio)^2))
+               rmsdA ← sqrt(mean(DevR^2))
+
+               cellsub ← subset cellcount where GDSBs matches h
+
+               Add metadata columns:
+                   method
+                   window
+                   N.attempted
+                   successful
+                   failed
+                   success_frac
+                   transstrength
+
+               Write Result to CSV in sdir
+
+18. Merge Simulation Parts
+   files ← list files in sdir
+   AllResult ← concatenate all CSV files
+   delete individual part files
+
+   Write AllResult to final CSV
+
+19. Summarize Results
+   FOR each method:
+       FOR each window:
+           FOR each transstrength:
+               compute mean successful DSBs
+               compute mean failed DSBs
+               append to simsum table
+
+20. Print "Sim generation done"
+
+END FUNCTION
